@@ -1,0 +1,14 @@
+# proxyproxy listens here for SOCKS5 client connections.
+listen: ":1080"
+
+# web UI / stats API listens here.
+web_listen: ":8080"
+
+# Upstream SOCKS5 proxies. Traffic is distributed round-robin.
+# Supports optional auth: socks5://user:pass@host:port
+upstream_proxies:
+  - "socks5://127.0.0.1:1081"
+  - "socks5://127.0.0.1:1082"
+
+# When true, client source IPs are collected and shown in the web UI.
+log_ips: false

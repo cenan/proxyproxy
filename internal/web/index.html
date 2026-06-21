@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>proxyproxy stats</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 2rem; line-height: 1.5;
+    background: #f7f7f8; color: #1a1a1a;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #111317; color: #e6e6e6; }
+    .card { background: #1b1f24; border-color: #2a2f36; }
+    table th { background: #232830; }
+    table td, table th { border-color: #2a2f36; }
+    .stat-value { color: #7cc7ff; }
+  }
+  h1 { margin: 0 0 1rem; font-size: 1.4rem; }
+  h2 { margin: 1.5rem 0 0.5rem; font-size: 1.1rem; font-weight: 600; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+  .card { background: #fff; border: 1px solid #e2e2e6; border-radius: 8px; padding: 0.9rem 1rem; }
+  .card .label { font-size: 0.78rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; }
+  .card .stat-value { font-size: 1.25rem; font-weight: 600; margin-top: 0.2rem; color: #2563eb; }
+  .meta { color: #6b7280; font-size: 0.85rem; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  table th, table td { text-align: left; padding: 0.55rem 0.7rem; border-bottom: 1px solid #e2e2e6; }
+  table th { background: #f0f0f3; font-weight: 600; }
+  table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.75rem; background: #d1fae5; color: #065f46; }
+  .pill.idle { background: #e5e7eb; color: #374151; }
+  .pill.err { background: #fee2e2; color: #991b1b; }
+  @media (prefers-color-scheme: dark) {
+    .pill { background: #064e3b; color: #6ee7b7; }
+    .pill.idle { background: #374151; color: #d1d5db; }
+    .pill.err { background: #7f1d1d; color: #fca5a5; }
+  }
+  a { color: #2563eb; }
+</style>
+</head>
+<body>
+<h1>proxyproxy</h1>
+<div class="meta" id="meta">loading…</div>
+
+<div class="cards" id="cards"></div>
+
+<h2>Upstream proxies</h2>
+<table id="proxies">
+  <thead><tr>
+    <th>Address</th><th class="num">Requests</th><th class="num">Connections</th>
+    <th class="num">Active</th><th class="num">Sent</th><th class="num">Received</th>
+    <th class="num">Errors</th><th>Status</th><th>Last used</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+
+<div id="clientsSection" style="display:none">
+  <h2>Client IPs</h2>
+  <table id="clients">
+    <thead><tr>
+      <th>IP</th><th class="num">Requests</th>
+      <th class="num">Sent</th><th class="num">Received</th><th>Last seen</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  const u = ['KiB','MiB','GiB','TiB','PiB'];
+  let i = -1; let v = b;
+  do { v /= 1024; i++; } while (v >= 1024 && i < u.length - 1);
+  return v.toFixed(2) + ' ' + u[i];
+}
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  return d.toLocaleString();
+}
+function relTime(ts) {
+  if (!ts) return 'never';
+  const s = Math.floor(Date.now()/1000) - ts;
+  if (s < 5) return 'just now';
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+function card(label, value) {
+  const d = document.createElement('div');
+  d.className = 'card';
+  d.innerHTML = `<div class="label">${label}</div><div class="stat-value">${value}</div>`;
+  return d;
+}
+async function refresh() {
+  try {
+    const r = await fetch('/api/stats');
+    const s = await r.json();
+    const cards = $('cards');
+    cards.innerHTML = '';
+    cards.appendChild(card('Total requests', s.total_requests));
+    cards.appendChild(card('Connections', s.total_connections));
+    cards.appendChild(card('Sent', fmtBytes(s.total_bytes_sent)));
+    cards.appendChild(card('Received', fmtBytes(s.total_bytes_recv)));
+    cards.appendChild(card('Errors', s.total_errors));
+    const uptime = Math.floor(Date.now()/1000) - s.start_time;
+    $('meta').textContent = 'Uptime: ' + relTime(s.start_time) + ' · updated ' + new Date().toLocaleTimeString();
+
+    const tb = $('proxies').querySelector('tbody');
+    tb.innerHTML = '';
+    for (const p of s.proxies || []) {
+      const tr = document.createElement('tr');
+      const status = p.active_conns > 0
+        ? `<span class="pill">${p.active_conns} active</span>`
+        : (p.errors > 0 ? `<span class="pill err">${p.errors} err</span>` : `<span class="pill idle">idle</span>`);
+      tr.innerHTML = `<td>${p.address}</td>
+        <td class="num">${p.requests}</td>
+        <td class="num">${p.connections}</td>
+        <td class="num">${p.active_conns}</td>
+        <td class="num">${fmtBytes(p.bytes_sent)}</td>
+        <td class="num">${fmtBytes(p.bytes_recv)}</td>
+        <td class="num">${p.errors}</td>
+        <td>${status}</td>
+        <td>${relTime(p.last_used)}</td>`;
+      tb.appendChild(tr);
+    }
+
+    if (s.clients && s.clients.length) {
+      $('clientsSection').style.display = '';
+      const ct = $('clients').querySelector('tbody');
+      ct.innerHTML = '';
+      for (const c of s.clients) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${c.ip}</td>
+          <td class="num">${c.requests}</td>
+          <td class="num">${fmtBytes(c.bytes_sent)}</td>
+          <td class="num">${fmtBytes(c.bytes_recv)}</td>
+          <td>${relTime(c.last_seen)}</td>`;
+        ct.appendChild(tr);
+      }
+    }
+  } catch (e) {
+    $('meta').textContent = 'error: ' + e.message;
+  }
+}
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
