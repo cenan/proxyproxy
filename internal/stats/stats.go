@@ -8,14 +8,15 @@ import (
 )
 
 type ProxyStats struct {
-	Address     string `json:"address"`
-	Requests    int64  `json:"requests"`
-	BytesSent   int64  `json:"bytes_sent"`
-	BytesRecv   int64  `json:"bytes_recv"`
-	Connections int64  `json:"connections"`
-	ActiveConns int64  `json:"active_conns"`
-	Errors      int64  `json:"errors"`
-	LastUsed    int64  `json:"last_used"`
+	Address       string `json:"address"`
+	Requests      int64  `json:"requests"`
+	BytesSent     int64  `json:"bytes_sent"`
+	BytesRecv     int64  `json:"bytes_recv"`
+	Connections   int64  `json:"connections"`
+	ActiveConns   int64  `json:"active_conns"`
+	Errors        int64  `json:"errors"`
+	LastUsed      int64  `json:"last_used"`
+	CooldownUntil int64  `json:"cooldown_until"`
 }
 
 type ClientRecord struct {
@@ -27,23 +28,23 @@ type ClientRecord struct {
 }
 
 type Snapshot struct {
-	TotalRequests  int64                  `json:"total_requests"`
-	TotalBytesSent int64                  `json:"total_bytes_sent"`
-	TotalBytesRecv int64                  `json:"total_bytes_recv"`
-	TotalConns     int64                  `json:"total_connections"`
-	TotalErrors    int64                  `json:"total_errors"`
-	StartTime      int64                  `json:"start_time"`
-	Proxies        []ProxyStats           `json:"proxies"`
-	Clients        []ClientRecord         `json:"clients,omitempty"`
+	TotalRequests  int64          `json:"total_requests"`
+	TotalBytesSent int64          `json:"total_bytes_sent"`
+	TotalBytesRecv int64          `json:"total_bytes_recv"`
+	TotalConns     int64          `json:"total_connections"`
+	TotalErrors    int64          `json:"total_errors"`
+	StartTime      int64          `json:"start_time"`
+	Proxies        []ProxyStats   `json:"proxies"`
+	Clients        []ClientRecord `json:"clients,omitempty"`
 }
 
 type Collector struct {
-	logIPs bool
-	mu     sync.RWMutex
-	byAddr map[string]*ProxyStats
-	order  []string
+	logIPs  bool
+	mu      sync.RWMutex
+	byAddr  map[string]*ProxyStats
+	order   []string
 	clients map[string]*ClientRecord
-	start  time.Time
+	start   time.Time
 }
 
 func New(logIPs bool) *Collector {
@@ -158,6 +159,15 @@ func (c *Collector) Error(address string) {
 	}
 }
 
+func (c *Collector) RecordCooldown(address string, until int64) {
+	c.mu.RLock()
+	p := c.byAddr[address]
+	c.mu.RUnlock()
+	if p != nil {
+		atomic.StoreInt64(&p.CooldownUntil, until)
+	}
+}
+
 func (c *Collector) Snapshot() Snapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -169,14 +179,15 @@ func (c *Collector) Snapshot() Snapshot {
 	for _, addr := range c.order {
 		p := c.byAddr[addr]
 		ps := ProxyStats{
-			Address:     p.Address,
-			Requests:    atomic.LoadInt64(&p.Requests),
-			BytesSent:   atomic.LoadInt64(&p.BytesSent),
-			BytesRecv:   atomic.LoadInt64(&p.BytesRecv),
-			Connections: atomic.LoadInt64(&p.Connections),
-			ActiveConns: atomic.LoadInt64(&p.ActiveConns),
-			Errors:      atomic.LoadInt64(&p.Errors),
-			LastUsed:    atomic.LoadInt64(&p.LastUsed),
+			Address:       p.Address,
+			Requests:      atomic.LoadInt64(&p.Requests),
+			BytesSent:     atomic.LoadInt64(&p.BytesSent),
+			BytesRecv:     atomic.LoadInt64(&p.BytesRecv),
+			Connections:   atomic.LoadInt64(&p.Connections),
+			ActiveConns:   atomic.LoadInt64(&p.ActiveConns),
+			Errors:        atomic.LoadInt64(&p.Errors),
+			LastUsed:      atomic.LoadInt64(&p.LastUsed),
+			CooldownUntil: atomic.LoadInt64(&p.CooldownUntil),
 		}
 		s.TotalRequests += ps.Requests
 		s.TotalBytesSent += ps.BytesSent

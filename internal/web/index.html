@@ -33,10 +33,12 @@
   .pill { display: inline-block; padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.75rem; background: #d1fae5; color: #065f46; }
   .pill.idle { background: #e5e7eb; color: #374151; }
   .pill.err { background: #fee2e2; color: #991b1b; }
+  .pill.cd { background: #fef3c7; color: #92400e; }
   @media (prefers-color-scheme: dark) {
     .pill { background: #064e3b; color: #6ee7b7; }
     .pill.idle { background: #374151; color: #d1d5db; }
     .pill.err { background: #7f1d1d; color: #fca5a5; }
+    .pill.cd { background: #78350f; color: #fcd34d; }
   }
   a { color: #2563eb; }
 </style>
@@ -115,9 +117,19 @@ async function refresh() {
     tb.innerHTML = '';
     for (const p of s.proxies || []) {
       const tr = document.createElement('tr');
-      const status = p.active_conns > 0
-        ? `<span class="pill">${p.active_conns} active</span>`
-        : (p.errors > 0 ? `<span class="pill err">${p.errors} err</span>` : `<span class="pill idle">idle</span>`);
+      const cdMs = p.cooldown_until ? Math.floor(p.cooldown_until / 1e6) : 0;
+      const cooling = cdMs > Date.now();
+      let status;
+      if (cooling) {
+        const secs = Math.ceil((cdMs - Date.now()) / 1000);
+        status = `<span class="pill cd">cooldown ${secs}s</span>`;
+      } else if (p.active_conns > 0) {
+        status = `<span class="pill">${p.active_conns} active</span>`;
+      } else if (p.errors > 0) {
+        status = `<span class="pill err">${p.errors} err</span>`;
+      } else {
+        status = `<span class="pill idle">idle</span>`;
+      }
       tr.innerHTML = `<td>${p.address}</td>
         <td class="num">${p.requests}</td>
         <td class="num">${p.connections}</td>

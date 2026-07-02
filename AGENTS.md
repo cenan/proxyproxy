@@ -36,5 +36,6 @@ real UI source is `internal/web/index.html`.
 - macOS + Linux only; do not add Windows support or guard for it.
 - No comments in code unless explicitly requested.
 - `log_ips` defaults to false; client IP collection is opt-in.
-- Upstream URLs use `socks5://` or `socks5h://` schemes; bare `host:port` is also
-  accepted. Auth via `socks5://user:pass@host:port`.
+- Upstream URLs use `socks5://`/`socks5h://` (default for bare `host:port`) or
+  `http://`/`https://` (HTTP CONNECT proxies) schemes. Auth via
+  `socks5://user:pass@host:port` or `http://user:pass@host:port`.

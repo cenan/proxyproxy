@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -38,19 +39,21 @@ func (c *countingConn) Write(b []byte) (int, error) {
 }
 
 type Upstream struct {
-	Address string
-	Dialer  proxy.Dialer
+	Address       string
+	Dialer        proxy.Dialer
+	cooldownUntil atomic.Int64
 }
 
 type Server struct {
 	listen    string
 	upstreams []*Upstream
 	rr        uint64
+	cooldown  time.Duration
 	stats     *stats.Collector
 }
 
-func NewServer(listen string, upstreamURLs []string, st *stats.Collector) (*Server, error) {
-	s := &Server{listen: listen, stats: st}
+func NewServer(listen string, upstreamURLs []string, cooldown time.Duration, st *stats.Collector) (*Server, error) {
+	s := &Server{listen: listen, cooldown: cooldown, stats: st}
 	for _, u := range upstreamURLs {
 		up, err := buildUpstream(u)
 		if err != nil {
@@ -71,14 +74,13 @@ func buildUpstream(raw string) (*Upstream, error) {
 		return nil, errors.New("empty upstream")
 	}
 	var addr, user, pass string
+	scheme := ""
 	if strings.Contains(raw, "://") {
 		u, err := url.Parse(raw)
 		if err != nil {
 			return nil, err
 		}
-		if !strings.EqualFold(u.Scheme, "socks5") && !strings.EqualFold(u.Scheme, "socks5h") {
-			return nil, fmt.Errorf("unsupported scheme %q (use socks5://)", u.Scheme)
-		}
+		scheme = strings.ToLower(u.Scheme)
 		addr = u.Host
 		if u.User != nil {
 			user = u.User.Username()
@@ -87,21 +89,47 @@ func buildUpstream(raw string) (*Upstream, error) {
 	} else {
 		addr = raw
 	}
-	var auth *proxy.Auth
-	if user != "" {
-		auth = &proxy.Auth{User: user, Password: pass}
+
+	switch scheme {
+	case "", "socks5", "socks5h":
+		var auth *proxy.Auth
+		if user != "" {
+			auth = &proxy.Auth{User: user, Password: pass}
+		}
+		d, err := proxy.SOCKS5("tcp", addr, auth, &net.Dialer{Timeout: 30 * time.Second})
+		if err != nil {
+			return nil, err
+		}
+		return &Upstream{Address: addr, Dialer: d}, nil
+	case "http", "https":
+		d := newHTTPDialer(addr, scheme == "https", user, pass, 30*time.Second)
+		return &Upstream{Address: addr, Dialer: d}, nil
+	default:
+		return nil, fmt.Errorf("unsupported scheme %q (use socks5:// or http://)", scheme)
 	}
-	d, err := proxy.SOCKS5("tcp", addr, auth, &net.Dialer{Timeout: 30 * time.Second})
-	if err != nil {
-		return nil, err
-	}
-	return &Upstream{Address: addr, Dialer: d}, nil
 }
 
 func (s *Server) pick() *Upstream {
 	n := uint64(len(s.upstreams))
-	idx := atomic.AddUint64(&s.rr, 1) % n
-	return s.upstreams[idx]
+	now := time.Now().UnixNano()
+	start := atomic.AddUint64(&s.rr, 1) % n
+	for i := uint64(0); i < n; i++ {
+		idx := (start + i) % n
+		up := s.upstreams[idx]
+		if up.cooldownUntil.Load() <= now {
+			return up
+		}
+	}
+	return nil
+}
+
+func (s *Server) applyCooldown(up *Upstream) {
+	if s.cooldown <= 0 {
+		return
+	}
+	until := time.Now().Add(s.cooldown).UnixNano()
+	up.cooldownUntil.Store(until)
+	s.stats.RecordCooldown(up.Address, until)
 }
 
 func (s *Server) ListenAddr() string { return s.listen }
@@ -137,6 +165,10 @@ func (s *Server) handle(client net.Conn) {
 	}
 
 	up := s.pick()
+	if up == nil {
+		writeReply(client, 0x05, replyConnRefused, atyp)
+		return
+	}
 	s.stats.ConnectionStart(up.Address)
 	defer s.stats.ConnectionEnd(up.Address)
 	s.stats.Request(up.Address, clientIP)
@@ -155,19 +187,34 @@ func (s *Server) handle(client net.Conn) {
 
 	var sent, recv int64
 	rc := &countingConn{Conn: remote, sent: &sent, recv: &recv}
-	pipe(client, rc)
+	pipe(client, rc, func(code int) {
+		if isCooldownStatus(code) {
+			s.applyCooldown(up)
+		}
+	})
 	s.stats.Traffic(up.Address, sent, recv, clientIP)
 }
 
-func pipe(a, b net.Conn) {
+func pipe(client net.Conn, remote *countingConn, onStatus func(int)) {
 	done := make(chan struct{}, 2)
 	go func() {
-		io.Copy(b, a)
+		io.Copy(remote, client)
 		done <- struct{}{}
 	}()
 	go func() {
-		io.Copy(a, b)
+		copyResponse(client, remote, onStatus)
 		done <- struct{}{}
 	}()
 	<-done
+}
+
+func copyResponse(dst io.Writer, src *countingConn, onStatus func(int)) {
+	br := bufio.NewReader(src)
+	peeked, err := br.Peek(16)
+	if err == nil && len(peeked) > 0 {
+		if code, ok := parseHTTPStatus(peeked); ok && onStatus != nil {
+			onStatus(code)
+		}
+	}
+	io.Copy(dst, br)
 }

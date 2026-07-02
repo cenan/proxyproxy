@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"cenanozen.com/proxyproxy/internal/config"
 	"cenanozen.com/proxyproxy/internal/proxy"
@@ -25,7 +26,8 @@ func main() {
 
 	st := stats.New(cfg.LogIPs)
 
-	srv, err := proxy.NewServer(cfg.Listen, cfg.UpstreamProxies, st)
+	cooldown := time.Duration(cfg.CooldownSeconds) * time.Second
+	srv, err := proxy.NewServer(cfg.Listen, cfg.UpstreamProxies, cooldown, st)
 	if err != nil {
 		log.Fatalf("proxy: %v", err)
 	}

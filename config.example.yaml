@@ -4,11 +4,22 @@ listen: ":1080"
 # web UI / stats API listens here.
 web_listen: ":8080"
 
-# Upstream SOCKS5 proxies. Traffic is distributed round-robin.
-# Supports optional auth: socks5://user:pass@host:port
+# Upstream proxies. Traffic is distributed round-robin.
+# Supported schemes:
+#   socks5://host:port  (or socks5h://), auth: socks5://user:pass@host:port
+#   http://host:port    for HTTP CONNECT proxies, auth: http://user:pass@host:port
+#   https://host:port   for HTTP CONNECT over TLS
+# Bare host:port defaults to SOCKS5.
 upstream_proxies:
   - "socks5://127.0.0.1:1081"
   - "socks5://127.0.0.1:1082"
+  # - "http://127.0.0.1:8080"
+  # - "https://user:pass@proxy.example.com:443"
 
 # When true, client source IPs are collected and shown in the web UI.
 log_ips: false
+
+# Seconds to skip an upstream proxy after it returns an HTTP 429 or any 5xx
+# response (only plain-HTTP traffic is inspected; HTTPS is end-to-end encrypted).
+# 0 disables cooldown entirely. Default: 60.
+cooldown_seconds: 60
