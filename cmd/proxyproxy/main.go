@@ -24,7 +24,17 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	st := stats.New(cfg.LogIPs)
+	st := stats.New(cfg.LogIPs, cfg.StatsFile)
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := st.Persist(); err != nil {
+				log.Printf("persist stats: %v", err)
+			}
+		}
+	}()
 
 	cooldown := time.Duration(cfg.CooldownSeconds) * time.Second
 	srv, err := proxy.NewServer(cfg.Listen, cfg.UpstreamProxies, cooldown, st, cfg.StateFile)
@@ -56,4 +66,7 @@ func main() {
 	<-sig
 	log.Printf("shutting down")
 	_ = ln.Close()
+	if err := st.Persist(); err != nil {
+		log.Printf("persist stats: %v", err)
+	}
 }

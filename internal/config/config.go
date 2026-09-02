@@ -14,6 +14,7 @@ type Config struct {
 	LogIPs          bool     `yaml:"log_ips"`
 	CooldownSeconds int      `yaml:"cooldown_seconds"`
 	StateFile       string   `yaml:"state_file"`
+	StatsFile       string   `yaml:"stats_file"`
 }
 
 func Default() *Config {
@@ -23,6 +24,7 @@ func Default() *Config {
 		LogIPs:          false,
 		CooldownSeconds: 60,
 		StateFile:       "proxyproxy.state.json",
+		StatsFile:       "proxyproxy.stats.json",
 	}
 }
 

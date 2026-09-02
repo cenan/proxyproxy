@@ -58,12 +58,24 @@
 
 <div class="cards" id="cards"></div>
 
+<h2>All time</h2>
+<div class="cards" id="cardsAll"></div>
+
 <h2>Upstream proxies <button id="enableAll" class="act enable" style="margin-left:0.5rem">Enable all</button></h2>
 <table id="proxies">
   <thead><tr>
     <th>Address</th><th class="num">Requests</th><th class="num">Connections</th>
     <th class="num">Active</th><th class="num">Sent</th><th class="num">Received</th>
     <th class="num">Errors</th><th>Status</th><th>Last used</th><th>Action</th>
+  </tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>All time by upstream</h2>
+<table id="proxiesAll">
+  <thead><tr>
+    <th>Address</th><th class="num">Requests</th><th class="num">Connections</th>
+    <th class="num">Sent</th><th class="num">Received</th><th class="num">Errors</th>
   </tr></thead>
   <tbody></tbody>
 </table>
@@ -119,8 +131,18 @@ async function refresh() {
     cards.appendChild(card('Sent', fmtBytes(s.total_bytes_sent)));
     cards.appendChild(card('Received', fmtBytes(s.total_bytes_recv)));
     cards.appendChild(card('Errors', s.total_errors));
-    const uptime = Math.floor(Date.now()/1000) - s.start_time;
-    $('meta').textContent = 'Uptime: ' + relTime(s.start_time) + ' · updated ' + new Date().toLocaleTimeString();
+
+    const at = s.all_time || {};
+    const cardsAll = $('cardsAll');
+    cardsAll.innerHTML = '';
+    cardsAll.appendChild(card('Total requests', at.total_requests ?? 0));
+    cardsAll.appendChild(card('Connections', at.total_connections ?? 0));
+    cardsAll.appendChild(card('Sent', fmtBytes(at.total_bytes_sent ?? 0)));
+    cardsAll.appendChild(card('Received', fmtBytes(at.total_bytes_recv ?? 0)));
+    cardsAll.appendChild(card('Errors', at.total_errors ?? 0));
+
+    const since = at.first_seen ? new Date(at.first_seen * 1000).toLocaleDateString() : '';
+    $('meta').textContent = 'Uptime: ' + relTime(s.start_time) + (since ? ' · all time since ' + since : '') + ' · updated ' + new Date().toLocaleTimeString();
 
     const tb = $('proxies').querySelector('tbody');
     tb.innerHTML = '';
@@ -168,6 +190,19 @@ async function refresh() {
         }
       });
     });
+
+    const tab = $('proxiesAll').querySelector('tbody');
+    tab.innerHTML = '';
+    for (const p of at.proxies || []) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${p.address}</td>
+        <td class="num">${p.requests}</td>
+        <td class="num">${p.connections}</td>
+        <td class="num">${fmtBytes(p.bytes_sent)}</td>
+        <td class="num">${fmtBytes(p.bytes_recv)}</td>
+        <td class="num">${p.errors}</td>`;
+      tab.appendChild(tr);
+    }
 
     if (s.clients && s.clients.length) {
       $('clientsSection').style.display = '';

@@ -28,3 +28,9 @@ cooldown_seconds: 60
 # stay disabled across restarts. Set to "" to disable persistence.
 # Default: proxyproxy.state.json
 state_file: "proxyproxy.state.json"
+
+# File that persists all-time stats (cumulative requests, bytes, connections,
+# errors) so they survive restarts and are shown alongside session stats in the
+# web UI. Set to "" to disable persistence.
+# Default: proxyproxy.stats.json
+stats_file: "proxyproxy.stats.json"
