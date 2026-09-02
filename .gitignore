@@ -1,4 +1,6 @@
 /bin/
 /tmp_test/
 config.yaml
+config.broken_proxies.yaml
+proxyproxy.state.json
 

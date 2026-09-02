@@ -27,7 +27,7 @@ func main() {
 	st := stats.New(cfg.LogIPs)
 
 	cooldown := time.Duration(cfg.CooldownSeconds) * time.Second
-	srv, err := proxy.NewServer(cfg.Listen, cfg.UpstreamProxies, cooldown, st)
+	srv, err := proxy.NewServer(cfg.Listen, cfg.UpstreamProxies, cooldown, st, cfg.StateFile)
 	if err != nil {
 		log.Fatalf("proxy: %v", err)
 	}
@@ -43,7 +43,7 @@ func main() {
 		}
 	}()
 
-	webSrv := web.NewServer(cfg.WebListen, st)
+	webSrv := web.NewServer(cfg.WebListen, st, srv)
 	go func() {
 		log.Printf("web UI listening on %s", webSrv.ListenAddr())
 		if err := webSrv.Serve(); err != nil {

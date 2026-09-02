@@ -17,6 +17,9 @@ type ProxyStats struct {
 	Errors        int64  `json:"errors"`
 	LastUsed      int64  `json:"last_used"`
 	CooldownUntil int64  `json:"cooldown_until"`
+	Disabled      bool   `json:"disabled"`
+
+	disabled int64
 }
 
 type ClientRecord struct {
@@ -168,6 +171,29 @@ func (c *Collector) RecordCooldown(address string, until int64) {
 	}
 }
 
+func (c *Collector) RecordDisabled(address string, disabled bool) {
+	c.mu.RLock()
+	p := c.byAddr[address]
+	c.mu.RUnlock()
+	if p != nil {
+		if disabled {
+			atomic.StoreInt64(&p.disabled, 1)
+		} else {
+			atomic.StoreInt64(&p.disabled, 0)
+		}
+	}
+}
+
+func (c *Collector) IsDisabled(address string) bool {
+	c.mu.RLock()
+	p := c.byAddr[address]
+	c.mu.RUnlock()
+	if p == nil {
+		return false
+	}
+	return atomic.LoadInt64(&p.disabled) == 1
+}
+
 func (c *Collector) Snapshot() Snapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -188,6 +214,7 @@ func (c *Collector) Snapshot() Snapshot {
 			Errors:        atomic.LoadInt64(&p.Errors),
 			LastUsed:      atomic.LoadInt64(&p.LastUsed),
 			CooldownUntil: atomic.LoadInt64(&p.CooldownUntil),
+			Disabled:      atomic.LoadInt64(&p.disabled) == 1,
 		}
 		s.TotalRequests += ps.Requests
 		s.TotalBytesSent += ps.BytesSent

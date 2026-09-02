@@ -13,6 +13,7 @@ type Config struct {
 	UpstreamProxies []string `yaml:"upstream_proxies"`
 	LogIPs          bool     `yaml:"log_ips"`
 	CooldownSeconds int      `yaml:"cooldown_seconds"`
+	StateFile       string   `yaml:"state_file"`
 }
 
 func Default() *Config {
@@ -21,6 +22,7 @@ func Default() *Config {
 		WebListen:       ":8080",
 		LogIPs:          false,
 		CooldownSeconds: 60,
+		StateFile:       "proxyproxy.state.json",
 	}
 }
 

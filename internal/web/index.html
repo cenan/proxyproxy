@@ -34,11 +34,20 @@
   .pill.idle { background: #e5e7eb; color: #374151; }
   .pill.err { background: #fee2e2; color: #991b1b; }
   .pill.cd { background: #fef3c7; color: #92400e; }
+  .pill.off { background: #e5e7eb; color: #374151; }
   @media (prefers-color-scheme: dark) {
     .pill { background: #064e3b; color: #6ee7b7; }
     .pill.idle { background: #374151; color: #d1d5db; }
     .pill.err { background: #7f1d1d; color: #fca5a5; }
     .pill.cd { background: #78350f; color: #fcd34d; }
+    .pill.off { background: #374151; color: #9ca3af; }
+  }
+  button.act { font: inherit; font-size: 0.8rem; padding: 0.15rem 0.55rem; border-radius: 6px; cursor: pointer; border: 1px solid #d1d5db; background: #fff; color: #1a1a1a; }
+  button.act.enable { color: #065f46; border-color: #6ee7b7; }
+  button.act.disable { color: #991b1b; border-color: #fca5a5; }
+  button.act:disabled { opacity: 0.5; cursor: default; }
+  @media (prefers-color-scheme: dark) {
+    button.act { background: #1b1f24; color: #e6e6e6; border-color: #2a2f36; }
   }
   a { color: #2563eb; }
 </style>
@@ -49,12 +58,12 @@
 
 <div class="cards" id="cards"></div>
 
-<h2>Upstream proxies</h2>
+<h2>Upstream proxies <button id="enableAll" class="act enable" style="margin-left:0.5rem">Enable all</button></h2>
 <table id="proxies">
   <thead><tr>
     <th>Address</th><th class="num">Requests</th><th class="num">Connections</th>
     <th class="num">Active</th><th class="num">Sent</th><th class="num">Received</th>
-    <th class="num">Errors</th><th>Status</th><th>Last used</th>
+    <th class="num">Errors</th><th>Status</th><th>Last used</th><th>Action</th>
   </tr></thead>
   <tbody></tbody>
 </table>
@@ -120,7 +129,9 @@ async function refresh() {
       const cdMs = p.cooldown_until ? Math.floor(p.cooldown_until / 1e6) : 0;
       const cooling = cdMs > Date.now();
       let status;
-      if (cooling) {
+      if (p.disabled) {
+        status = `<span class="pill off">disabled</span>`;
+      } else if (cooling) {
         const secs = Math.ceil((cdMs - Date.now()) / 1000);
         status = `<span class="pill cd">cooldown ${secs}s</span>`;
       } else if (p.active_conns > 0) {
@@ -130,6 +141,9 @@ async function refresh() {
       } else {
         status = `<span class="pill idle">idle</span>`;
       }
+      const act = p.disabled
+        ? `<button class="act enable" data-addr="${p.address}">Enable</button>`
+        : `<button class="act disable" data-addr="${p.address}">Disable</button>`;
       tr.innerHTML = `<td>${p.address}</td>
         <td class="num">${p.requests}</td>
         <td class="num">${p.connections}</td>
@@ -138,9 +152,22 @@ async function refresh() {
         <td class="num">${fmtBytes(p.bytes_recv)}</td>
         <td class="num">${p.errors}</td>
         <td>${status}</td>
-        <td>${relTime(p.last_used)}</td>`;
+        <td>${relTime(p.last_used)}</td>
+        <td>${act}</td>`;
       tb.appendChild(tr);
     }
+    tb.querySelectorAll('button.act').forEach(b => {
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        const path = b.classList.contains('disable') ? '/api/disable' : '/api/enable';
+        try {
+          await fetch(path + '?addr=' + encodeURIComponent(b.dataset.addr), { method: 'POST' });
+          refresh();
+        } catch (e) {
+          b.disabled = false;
+        }
+      });
+    });
 
     if (s.clients && s.clients.length) {
       $('clientsSection').style.display = '';
@@ -162,6 +189,16 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, 2000);
+$('enableAll').addEventListener('click', async () => {
+  const b = $('enableAll');
+  b.disabled = true;
+  try {
+    await fetch('/api/enable-all', { method: 'POST' });
+    refresh();
+  } finally {
+    b.disabled = false;
+  }
+});
 </script>
 </body>
 </html>

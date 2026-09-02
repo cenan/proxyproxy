@@ -2,12 +2,15 @@ package proxy
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -42,6 +45,7 @@ type Upstream struct {
 	Address       string
 	Dialer        proxy.Dialer
 	cooldownUntil atomic.Int64
+	disabled      atomic.Bool
 }
 
 type Server struct {
@@ -50,10 +54,12 @@ type Server struct {
 	rr        uint64
 	cooldown  time.Duration
 	stats     *stats.Collector
+	statePath string
+	stateMu   sync.Mutex
 }
 
-func NewServer(listen string, upstreamURLs []string, cooldown time.Duration, st *stats.Collector) (*Server, error) {
-	s := &Server{listen: listen, cooldown: cooldown, stats: st}
+func NewServer(listen string, upstreamURLs []string, cooldown time.Duration, st *stats.Collector, statePath string) (*Server, error) {
+	s := &Server{listen: listen, cooldown: cooldown, stats: st, statePath: statePath}
 	for _, u := range upstreamURLs {
 		up, err := buildUpstream(u)
 		if err != nil {
@@ -65,6 +71,7 @@ func NewServer(listen string, upstreamURLs []string, cooldown time.Duration, st 
 	if len(s.upstreams) == 0 {
 		return nil, errors.New("no upstream proxies configured")
 	}
+	s.loadState()
 	return s, nil
 }
 
@@ -111,16 +118,28 @@ func buildUpstream(raw string) (*Upstream, error) {
 
 func (s *Server) pick() *Upstream {
 	n := uint64(len(s.upstreams))
-	now := time.Now().UnixNano()
-	start := atomic.AddUint64(&s.rr, 1) % n
-	for i := uint64(0); i < n; i++ {
-		idx := (start + i) % n
-		up := s.upstreams[idx]
-		if up.cooldownUntil.Load() <= now {
-			return up
-		}
+	if n == 0 {
+		return nil
 	}
-	return nil
+	now := time.Now().UnixNano()
+	for {
+		cur := atomic.LoadUint64(&s.rr)
+		for i := uint64(0); i < n; i++ {
+			idx := (cur + i) % n
+			up := s.upstreams[idx]
+			if up.disabled.Load() || up.cooldownUntil.Load() > now {
+				continue
+			}
+			if atomic.CompareAndSwapUint64(&s.rr, cur, (idx+1)%n) {
+				return up
+			}
+			break
+		}
+		if !atomic.CompareAndSwapUint64(&s.rr, cur, (cur+1)%n) {
+			continue
+		}
+		return nil
+	}
 }
 
 func (s *Server) applyCooldown(up *Upstream) {
@@ -130,6 +149,68 @@ func (s *Server) applyCooldown(up *Upstream) {
 	until := time.Now().Add(s.cooldown).UnixNano()
 	up.cooldownUntil.Store(until)
 	s.stats.RecordCooldown(up.Address, until)
+}
+
+func (s *Server) SetDisabled(address string, disabled bool) {
+	for _, up := range s.upstreams {
+		if up.Address == address {
+			up.disabled.Store(disabled)
+			s.stats.RecordDisabled(address, disabled)
+			s.saveState()
+			return
+		}
+	}
+}
+
+func (s *Server) EnableAll() {
+	for _, up := range s.upstreams {
+		up.disabled.Store(false)
+		s.stats.RecordDisabled(up.Address, false)
+	}
+	s.saveState()
+}
+
+func (s *Server) loadState() {
+	if s.statePath == "" {
+		return
+	}
+	data, err := os.ReadFile(s.statePath)
+	if err != nil {
+		return
+	}
+	var addrs []string
+	if err := json.Unmarshal(data, &addrs); err != nil {
+		return
+	}
+	set := make(map[string]struct{}, len(addrs))
+	for _, a := range addrs {
+		set[a] = struct{}{}
+	}
+	for _, up := range s.upstreams {
+		if _, ok := set[up.Address]; ok {
+			up.disabled.Store(true)
+			s.stats.RecordDisabled(up.Address, true)
+		}
+	}
+}
+
+func (s *Server) saveState() {
+	if s.statePath == "" {
+		return
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	addrs := make([]string, 0)
+	for _, up := range s.upstreams {
+		if up.disabled.Load() {
+			addrs = append(addrs, up.Address)
+		}
+	}
+	data, err := json.MarshalIndent(addrs, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(s.statePath, data, 0o644)
 }
 
 func (s *Server) ListenAddr() string { return s.listen }

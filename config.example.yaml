@@ -23,3 +23,8 @@ log_ips: false
 # response (only plain-HTTP traffic is inspected; HTTPS is end-to-end encrypted).
 # 0 disables cooldown entirely. Default: 60.
 cooldown_seconds: 60
+
+# File that persists the list of upstreams disabled from the web UI so they
+# stay disabled across restarts. Set to "" to disable persistence.
+# Default: proxyproxy.state.json
+state_file: "proxyproxy.state.json"
